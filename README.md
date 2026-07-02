@@ -11,6 +11,11 @@ out: 161.3 tok/s                              stock claude-hud — grey, vanishe
                                                whole session
 ```
 
+## Preview
+
+<img width="1168" height="109" alt="Warp 2026-07-02 10 50 36" src="https://github.com/user-attachments/assets/1a6d1fa2-45e4-4ff9-817f-1af4d444fe97" />
+
+
 ## Install
 
 ```bash
