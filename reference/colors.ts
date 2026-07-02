@@ -117,9 +117,20 @@ export function critical(text: string, colors?: Partial<HudColorOverrides>): str
   return colorize(text, resolveAnsi(colors?.critical, RED));
 }
 
-export function getContextColor(percent: number, colors?: Partial<HudColorOverrides>): string {
-  if (percent >= 85) return resolveAnsi(colors?.critical, RED);
-  if (percent >= 70) return resolveAnsi(colors?.warning, YELLOW);
+export interface ContextThresholds {
+  warning?: number;
+  critical?: number;
+}
+
+export function getContextColor(
+  percent: number,
+  colors?: Partial<HudColorOverrides>,
+  thresholds?: ContextThresholds,
+): string {
+  const critical = thresholds?.critical ?? 85;
+  const warning = thresholds?.warning ?? 70;
+  if (percent >= critical) return resolveAnsi(colors?.critical, RED);
+  if (percent >= warning) return resolveAnsi(colors?.warning, YELLOW);
   return resolveAnsi(colors?.context, GREEN);
 }
 
@@ -129,34 +140,43 @@ export function getQuotaColor(percent: number, colors?: Partial<HudColorOverride
   return resolveAnsi(colors?.usage, BRIGHT_BLUE);
 }
 
-/** Tiered color by current speed: fast=green, everything else=cyan. Never dim — a slow reading should still be easy to read, not look faded/broken. */
-export function getSpeedColor(tokPerSec: number): string {
-  if (tokPerSec >= 150) return GREEN;
-  return CYAN;
-}
-
-/** Full speed segment: current tok/s (tiered green/cyan) plus a bright-magenta peak/avg/min summary — magenta sits far enough from both speed tiers on the color wheel that the two segments never read as the same color. */
-export function formatSpeedReading(reading: SpeedReading): string {
-  const current = `${getSpeedColor(reading.speed)}⚡ ${reading.speed.toFixed(1)} tok/s${RESET}`;
-  const { max, avg, min } = reading.stats;
-  const summary = `${BRIGHT_MAGENTA}(▲${max.toFixed(0)} ~${avg.toFixed(0)} ▼${min.toFixed(0)})${RESET}`;
-  return `${current} ${summary}`;
-}
-
 export function quotaBar(percent: number, width: number = 10, colors?: Partial<HudColorOverrides>): string {
   const safeWidth = Number.isFinite(width) ? Math.max(0, Math.round(width)) : 0;
   const safePercent = Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0;
   const filled = Math.round((safePercent / 100) * safeWidth);
   const empty = safeWidth - filled;
   const color = getQuotaColor(safePercent, colors);
-  return `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
+  const filledChar = colors?.barFilled ?? '█';
+  const emptyChar = colors?.barEmpty ?? '░';
+  return `${color}${filledChar.repeat(filled)}${DIM}${emptyChar.repeat(empty)}${RESET}`;
 }
 
-export function coloredBar(percent: number, width: number = 10, colors?: Partial<HudColorOverrides>): string {
+export function coloredBar(
+  percent: number,
+  width: number = 10,
+  colors?: Partial<HudColorOverrides>,
+  thresholds?: ContextThresholds,
+): string {
   const safeWidth = Number.isFinite(width) ? Math.max(0, Math.round(width)) : 0;
   const safePercent = Number.isFinite(percent) ? Math.min(100, Math.max(0, percent)) : 0;
   const filled = Math.round((safePercent / 100) * safeWidth);
   const empty = safeWidth - filled;
-  const color = getContextColor(safePercent, colors);
-  return `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
+  const color = getContextColor(safePercent, colors, thresholds);
+  const filledChar = colors?.barFilled ?? '█';
+  const emptyChar = colors?.barEmpty ?? '░';
+  return `${color}${filledChar.repeat(filled)}${DIM}${emptyChar.repeat(empty)}${RESET}`;
+}
+
+/** Tiered color by current speed: fast=green, everything else=cyan. Never dim — a slow reading should still be easy to read, not look faded/broken. */
+export function getSpeedColor(tokPerSec) {
+  if (tokPerSec >= 150) return GREEN;
+  return CYAN;
+}
+
+/** Full speed segment: current tok/s (tiered green/cyan) plus a bright-magenta peak/avg/min summary — magenta sits far enough from both speed tiers on the color wheel that the two segments never read as the same color. */
+export function formatSpeedReading(reading) {
+  const current = `${getSpeedColor(reading.speed)}⚡ ${reading.speed.toFixed(1)} tok/s${RESET}`;
+  const { max, avg, min } = reading.stats;
+  const summary = `${BRIGHT_MAGENTA}(▲${max.toFixed(0)} ~${avg.toFixed(0)} ▼${min.toFixed(0)})${RESET}`;
+  return `${current} ${summary}`;
 }

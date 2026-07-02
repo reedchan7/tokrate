@@ -32,10 +32,10 @@ script reports incompatibility, read https://github.com/reedchan7/tokrate's
 reference/ and DESIGN.md and port the change by hand instead.
 ```
 
-`install.sh` locates your claude-hud install, backs up the files it's about to touch,
-patches them, and runs a real self-test before declaring success — it either works and
-tells you so, or fails loudly and rolls back. Standalone copy of the prompt in
-[PROMPT.md](PROMPT.md).
+`install.sh` installs `claude-hud` itself if it isn't already, locates the install,
+backs up the files it's about to touch, patches them, and runs a real self-test before
+declaring success — it either works and tells you so, or fails loudly and rolls back.
+Standalone copy of the prompt in [PROMPT.md](PROMPT.md).
 
 ## Why
 
@@ -55,8 +55,10 @@ bugs that motivated the rewrite, in [DESIGN.md](DESIGN.md).
 ## What's here
 
 - `install.sh` — the installer
-- `reference/` — the patched source (`speed-tracker.ts`, `colors.ts`, `session-line.ts`,
-  `lines/project.ts`)
+- `apply-patch.mjs` — surgically patches `colors.ts`/`session-line.ts`/`lines/project.ts`
+  in place (only `speed-tracker.ts` is replaced wholesale)
+- `reference/` — a current-version worked example (`speed-tracker.ts`, `colors.ts`,
+  `session-line.ts`, `lines/project.ts`) for manual porting
 - `PROMPT.md` — the agent prompt, standalone
 - `DESIGN.md` — algorithm rationale, the bugs this replaces, manual porting notes
 - `.github/workflows/shellcheck.yml` — lints `install.sh` on every push/PR

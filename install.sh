@@ -6,8 +6,11 @@
 #   ./install.sh
 #
 # What it does: locates the active claude-hud plugin version directory, backs up the
-# four files it's about to touch, replaces them with tokrate's reference implementation,
-# turns on the showSpeed display flag, then runs a real statusline invocation against a
+# four files it's about to touch, replaces speed-tracker.ts wholesale and surgically
+# patches the showSpeed block into colors.ts/session-line.ts/lines/project.ts (those
+# three carry a lot of fast-moving, speed-unrelated content across claude-hud releases,
+# so only the exact block + its import line are touched — see apply-patch.mjs), turns
+# on the showSpeed display flag, then runs a real statusline invocation against a
 # synthetic transcript to confirm the change actually works before declaring success.
 # If anything goes wrong after patching starts, the four files are restored from backup.
 #
@@ -50,8 +53,23 @@ tokrate: $REPO_URL and port the change by hand instead."
 }
 
 command -v bun >/dev/null 2>&1 \
-  || fail "bun not found on PATH (claude-hud itself requires it — is claude-hud actually installed and working?)"
-[ -d "$PLUGIN_ROOT" ] || fail "claude-hud not found at $PLUGIN_ROOT — is the plugin installed?"
+  || fail "bun not found on PATH (needed to run claude-hud's statusline and this installer's self-test)"
+
+if [ ! -d "$PLUGIN_ROOT" ]; then
+  info "claude-hud not found at $PLUGIN_ROOT — attempting to install it"
+  command -v claude >/dev/null 2>&1 \
+    || fail "claude-hud isn't installed and the claude CLI isn't on PATH to install it automatically.
+tokrate: install it yourself, then re-run this installer:
+tokrate:   claude plugin marketplace add jarrodwatts/claude-hud
+tokrate:   claude plugin install claude-hud@claude-hud"
+  claude plugin marketplace add jarrodwatts/claude-hud \
+    || fail "could not add the claude-hud marketplace. Try manually: claude plugin marketplace add jarrodwatts/claude-hud"
+  claude plugin install claude-hud@claude-hud \
+    || fail "could not install claude-hud. Try manually: claude plugin install claude-hud@claude-hud"
+  [ -d "$PLUGIN_ROOT" ] \
+    || fail "claude-hud install reported success but $PLUGIN_ROOT still doesn't exist — check 'claude plugin list' and re-run this installer."
+  info "claude-hud installed"
+fi
 
 VERSION_DIR=$(find "$PLUGIN_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
   | awk -F/ '{ print $NF "\t" $0 "/" }' \
@@ -68,7 +86,7 @@ info "found claude-hud at $VERSION_DIR"
 # piped in via curl (clones the repo to a temp dir instead).
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 if [ -n "$SCRIPT_SOURCE" ] && [ -f "$SCRIPT_SOURCE" ] && [ -d "$(dirname "$SCRIPT_SOURCE")/reference" ]; then
-  REF="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)/reference"
+  REPO_ROOT="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 else
   command -v git >/dev/null 2>&1 \
     || fail "git not found on PATH (needed to fetch the patch — clone $REPO_URL yourself and re-run install.sh from inside it)"
@@ -76,9 +94,12 @@ else
   CLEANUP_DIRS+=("$WORKDIR")
   info "fetching tokrate..."
   git clone --depth 1 -q "$REPO_URL" "$WORKDIR" || fail "could not clone $REPO_URL"
-  REF="$WORKDIR/reference"
+  REPO_ROOT="$WORKDIR"
 fi
+REF="$REPO_ROOT/reference"
+PATCHER="$REPO_ROOT/apply-patch.mjs"
 [ -d "$REF" ] || fail "reference/ missing from tokrate checkout"
+[ -f "$PATCHER" ] || fail "apply-patch.mjs missing from tokrate checkout"
 
 CURRENT_SPEED_TRACKER="$SRC_DIR/speed-tracker.ts"
 CURRENT_COLORS="$SRC_DIR/render/colors.ts"
@@ -88,16 +109,6 @@ CURRENT_PROJECT_LINE="$SRC_DIR/render/lines/project.ts"
 for f in "$CURRENT_SPEED_TRACKER" "$CURRENT_COLORS" "$CURRENT_SESSION_LINE" "$CURRENT_PROJECT_LINE"; do
   [ -f "$f" ] || manual_fallback "expected file missing: $f"
 done
-
-# Compatibility check: bail rather than corrupt an install whose internals have
-# drifted too far from what these reference files assume. This only catches the call
-# site itself — the self-test below is the real backstop for deeper drift (renamed
-# helpers, reshaped types elsewhere in the plugin), which is why it's mandatory, not
-# best-effort.
-grep -q "getOutputSpeed(ctx.stdin)" "$CURRENT_SESSION_LINE" \
-  || manual_fallback "render/session-line.ts call site doesn't match what tokrate expects."
-grep -q "getOutputSpeed(ctx.stdin)" "$CURRENT_PROJECT_LINE" \
-  || manual_fallback "render/lines/project.ts call site doesn't match what tokrate expects."
 
 # Back up, then patch. From here on, an abort restores the four files from BACKUP_DIR
 # (see cleanup() above) instead of leaving a mixed old/new file set behind.
@@ -112,10 +123,16 @@ info "backed up originals to $BACKUP_DIR"
 PATCH_STARTED=1
 
 cp "$REF/speed-tracker.ts" "$CURRENT_SPEED_TRACKER"
-cp "$REF/colors.ts" "$CURRENT_COLORS"
-cp "$REF/session-line.ts" "$CURRENT_SESSION_LINE"
-cp "$REF/lines/project.ts" "$CURRENT_PROJECT_LINE"
-info "patched speed-tracker.ts, colors.ts, session-line.ts, lines/project.ts"
+info "replaced speed-tracker.ts"
+
+# colors.ts/session-line.ts/lines/project.ts are patched in place rather than replaced
+# wholesale — they carry a lot of fast-moving, speed-unrelated content across claude-hud
+# releases (i18n, cost estimates, advisor lines, git file stats, etc.), and a blind
+# overwrite silently deletes whatever's new in the installed version. apply-patch.mjs
+# fails loudly (caught by set -e, triggering the rollback above) if the exact block or
+# import line it expects isn't there, rather than guessing.
+bun "$PATCHER" "$SRC_DIR" \
+  || manual_fallback "surgical patch of colors.ts/session-line.ts/lines/project.ts failed — see the error above."
 
 # Keep only the 5 most recent backups so these don't accumulate forever across updates.
 # Names sort lexicographically the same as chronologically (YYYYMMDDHHMMSS), so a plain

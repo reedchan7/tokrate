@@ -157,6 +157,70 @@ reflects real end-to-end latency for that turn, not "pure decode throughput." Th
 no finer-grained, per-token streaming timestamp available in the transcript to split
 those apart.
 
+## Version drift found by actually testing against a version jump: wholesale copy is the wrong mechanism for 3 of the 4 files
+
+`install.sh` originally replaced all four target files wholesale — copy `reference/*.ts`
+straight over the installed files, gated by a grep for the literal call site
+`getOutputSpeed(ctx.stdin)`. This looked safe as long as testing only ever happened
+against whatever version was already cached locally (0.0.11, installed months earlier
+and never auto-updated). Testing the actual `curl | bash` install path against a
+genuinely fresh environment — no local checkout, `claude-hud` not installed at all —
+surfaced two things at once:
+
+1. **A missing capability, not just a missing check.** `install.sh` required
+   `claude-hud` to already be installed and just failed with "is the plugin installed?"
+   otherwise. Since `claude plugin marketplace add`/`claude plugin install` are both
+   real, non-interactive, idempotent CLI commands, `install.sh` now auto-installs
+   `claude-hud` when it's missing (falling back to printing the manual commands only
+   if the `claude` CLI itself isn't on PATH).
+2. **The auto-install pulled `claude-hud` 0.3.0** — five minor versions ahead of the
+   0.0.11 every reference file had been written and tested against. `render/colors.ts`,
+   `render/session-line.ts`, and `render/lines/project.ts` had all grown substantially
+   in the meantime: i18n (`t(...)`), cost-estimate/prompt-cache/session-time/advisor
+   lines, provider-aware model formatting, configurable context thresholds, a new git
+   file-stats line (`renderGitFilesLine`), and more — none of it related to speed.
+   Copying the old reference files over these wholesale did pass the `getOutputSpeed`
+   grep check (the call site itself hadn't moved), but crashed the whole statusline
+   with `SyntaxError: export 'renderGitFilesLine' not found in './project.js'` — a
+   different file (`render/lines/index.ts`) still expected to re-export a function the
+   overwritten `project.ts` no longer had, because it belonged to 0.3.0 and the
+   overwrite silently deleted it. The self-test *did* correctly catch this and roll
+   back rather than leaving the install broken — but a fresh environment has no
+   `settings.json` yet either, so in that specific case the self-test itself couldn't
+   run, and the install just failed outright instead of subtly breaking the statusline.
+   Either way: shipping this against current `claude-hud` would have made tokrate
+   simply not work for anyone starting fresh.
+
+**Fix — stop wholesale-copying the three files that carry unrelated content, patch them
+in place instead.** `speed-tracker.ts` still gets replaced wholesale (nothing else in
+the plugin imports from it beyond the single `getOutputSpeed` call, so there's nothing
+to lose). `colors.ts`/`session-line.ts`/`lines/project.ts` are now patched surgically by
+[`apply-patch.mjs`](apply-patch.mjs):
+
+- **`colors.ts`**: verifies the `GREEN`/`CYAN`/`BRIGHT_MAGENTA`/`RESET` constants it
+  needs still exist, then *appends* an import (`SpeedReading` type) and the
+  `getSpeedColor`/`formatSpeedReading` functions — additive only, nothing existing is
+  touched.
+- **`session-line.ts`** / **`lines/project.ts`**: finds the literal
+  `if (display?.showSpeed) {` marker, walks forward counting brace depth to find its
+  *matching* closing brace (robust to whatever's inside — the exact rendering
+  expression has already differed between 0.0.11 and 0.3.0), and replaces only that
+  span with the fixed 5-line reading/rendering block, adding `formatSpeedReading` to
+  the existing `colors.js` import if it isn't already there.
+
+Every check fails loudly (thrown error, non-zero exit, caught by `install.sh`'s `set -e`
+and rolled back via the existing backup) rather than guessing — same fail-closed
+posture as before, just checking the right things now. Verified against both a fully
+fresh environment (auto-install pulling 0.3.0, patch, self-test, all in one run) and the
+real 0.0.11 → 0.3.0 upgrade path on the machine this was developed on; both patch
+cleanly, both preserve every unrelated feature (`renderGitFilesLine` included), and both
+produce identical, sane numbers against the same real transcripts.
+
+`reference/colors.ts`, `reference/session-line.ts`, and `reference/lines/project.ts` are
+now kept as **current-version worked examples** (currently 0.3.0-based) for humans or
+agents doing the manual fallback below — `install.sh` itself no longer copies them
+directly.
+
 ## Known limitation
 
 This patches `claude-hud`'s versioned plugin-cache directory
@@ -169,30 +233,27 @@ upstreaming this into `claude-hud` itself.
 
 ## Manual porting (when install.sh can't do it automatically)
 
-`install.sh` checks for the literal call site `getOutputSpeed(ctx.stdin)` in the
-installed `render/session-line.ts` and `render/lines/project.ts` before touching
-anything, and refuses to proceed if it's missing — a signal that the plugin's
-internals have drifted further than a straight file copy can safely handle. That
-check only covers the call site itself, though — each reference file also assumes
-several sibling symbols still exist with the same shape: `speed-tracker.ts` imports
-`StdinData` from `./types.js`; `colors.ts` imports `HudColorName`/`HudColorValue`/
-`HudColorOverrides` from `../config.js`; `session-line.ts` imports `RenderContext` and
-`isLimitReached` from `../types.js` and `getContextPercent`/`getBufferedPercent`/
-`getModelName`/`getProviderLabel`/`getTotalTokens` from `../stdin.js` and
-`getAdaptiveBarWidth` from `../utils/terminal.js`; `lines/project.ts` imports
-`RenderContext` from `../../types.js` and `getModelName`/`getProviderLabel` from
-`../../stdin.js`. If any of those have been renamed or reshaped elsewhere in the
-plugin, the call-site grep can still pass while the patched files fail at runtime —
-`install.sh`'s self-test is the real backstop for that class of drift, which is why
-it's a hard failure (with automatic rollback) rather than a skippable check. If it
+`apply-patch.mjs` fails loudly — thrown error, `install.sh` rolls back to the backup —
+if any of what it depends on has moved: the `GREEN`/`CYAN`/`BRIGHT_MAGENTA`/`RESET`
+color constants in `colors.ts`, or the `if (display?.showSpeed) {` marker and its
+`getOutputSpeed(ctx.stdin)` call in `session-line.ts`/`lines/project.ts`. That's still
+narrower than everything the reference files assume, though — `speed-tracker.ts`
+imports `StdinData` from `./types.js`; `colors.ts` imports `HudColorName`/
+`HudColorValue`/`HudColorOverrides` from `../config.js`; the two render files import
+`RenderContext` and whatever model/context helpers they call from `../stdin.js` (or
+`../../stdin.js`). If any of those have been renamed or reshaped elsewhere in the
+plugin, `install.sh`'s self-test is the real backstop for that class of drift, which is
+why it's a hard failure (with automatic rollback) rather than a skippable check. If it
 does fail, or you're porting by hand for any other reason:
 
 1. Diff each file in `reference/` against its counterpart in the installed
-   `.../claude-hud/<version>/src/` tree. If a file is structurally close (same
-   exports, same call sites), replace it wholesale. If it's diverged — different
-   function names, different types, a different render pipeline — port the same
-   *logic* instead of copy-pasting; the goal is behavior parity, not literal file
-   identity.
+   `.../claude-hud/<version>/src/` tree — `reference/` holds a current-version worked
+   example, not necessarily what your installed version looks like. For
+   `speed-tracker.ts`, replace wholesale if structurally close, otherwise port the
+   *logic*. For `colors.ts`/`session-line.ts`/`lines/project.ts`, don't copy the whole
+   file — find the equivalent `getSpeedColor`/`formatSpeedReading` functions and the
+   `showSpeed` rendering block in `reference/` and insert just those into the installed
+   file's real current structure, the same way `apply-patch.mjs` does it mechanically.
 2. Confirm `showSpeed: true` is set under `display` in
    `~/.claude/plugins/claude-hud/config.json` (add the key if it's missing).
 3. Verify the same way `install.sh`'s self-test does: pipe a synthetic stdin payload
