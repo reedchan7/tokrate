@@ -2,11 +2,13 @@
 
 Paste this into your coding agent (Claude Code or anything with shell access):
 
-> Run tokrate's installer to fix claude-hud's tok/s display
-> (`curl -fsSL https://raw.githubusercontent.com/reedchan7/tokrate/main/install.sh | bash`),
-> confirm the statusline now shows a persistent `⚡ tok/s (▲~▼)` segment, and if the
-> script reports incompatibility, read `https://github.com/reedchan7/tokrate`'s
-> `reference/` and `DESIGN.md` to port the change by hand instead.
+```
+Run tokrate's installer to fix claude-hud's tok/s display by running
+curl -fsSL https://raw.githubusercontent.com/reedchan7/tokrate/main/install.sh | bash
+then confirm the statusline shows a persistent "⚡ tok/s (▲~▼)" segment. If the
+script reports incompatibility, read https://github.com/reedchan7/tokrate's
+reference/ and DESIGN.md and port the change by hand instead.
+```
 
 If you'd rather run it yourself without an agent in the loop:
 
