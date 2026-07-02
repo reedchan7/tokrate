@@ -95,6 +95,46 @@ Verified against a real 2MB / 1200-line, 15-hour transcript: full reparse takes
 ~90ms (statusline-refresh budget is generally hundreds of ms), and every number
 produced was in a physically sane range.
 
+## Bug found after the rewrite: interleaved tool_use blocks re-attributing a message's full token count
+
+The first version of the rewrite closed out the "current message" on *every* `user`
+entry — reasoning that a `user` entry always means the previous assistant turn is
+done. That's wrong for a message with multiple `tool_use` blocks: Claude Code can log
+each block's tool result as its own `user` entry as soon as that tool finishes, while
+*later* blocks of the *same* message (same `message.id`) are still being written. The
+transcript ends up looking like:
+
+```
+assistant (thinking)      msg_ABC
+assistant (tool_use #1)   msg_ABC
+user (tool_result #1)
+assistant (tool_use #2)   msg_ABC   <- same message.id, after an intervening user entry
+user (tool_result #2)
+assistant (tool_use #3)   msg_ABC   <- same message.id again
+user (tool_result #3)
+```
+
+Closing on every `user` entry finalized `msg_ABC` after the first `tool_use` block,
+then treated its reappearance as a *new* message starting fresh from the just-seen
+`user` timestamp. Since `usage.output_tokens` is the message's full total token count
+(not a per-block increment), the same ~1000-token total got re-attributed to each
+remaining fragment, each spanning well under a second — producing readings confirmed
+in real session transcripts as high as 5,048 tok/s.
+
+Found by testing the actual documented install path end-to-end (a `curl | bash`
+install plus a fresh agent following [PROMPT.md](PROMPT.md) with no context from the
+development conversation) against several real recent session transcripts, rather than
+only the synthetic two-line self-test transcript, which never exercises multi-tool-call
+messages.
+
+**Fix:** track messages in a map keyed by `message.id` instead of a single "current
+message" slot. A message's interval starts at first sighting and its end keeps
+extending as later blocks for the same id arrive, regardless of what `user` entries
+are interleaved in between — so the same message contributes exactly one interval, at
+its true (possibly tool-call-spanning) duration, no matter how its blocks are split
+across the transcript. Re-verified against the same real transcripts that had produced
+impossible readings: all now report rates in the tens-to-low-hundreds tok/s range.
+
 ## What's deliberately not carried over from claude-hud's original code
 
 - **`isLive`** — no longer meaningful. Every reading is now "the real rate of the
