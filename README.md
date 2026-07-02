@@ -63,4 +63,4 @@ bugs that motivated the rewrite, in [DESIGN.md](DESIGN.md).
 
 ## License
 
-MIT
+[MIT](./LICENSE)
