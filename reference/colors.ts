@@ -135,11 +135,11 @@ export function getSpeedColor(tokPerSec: number): string {
   return CYAN;
 }
 
-/** Full speed segment: current tok/s (tiered by speed) plus a bright-blue peak/avg/min summary for the session — deliberately a different color from either speed tier so the two never blend together. */
+/** Full speed segment: current tok/s (tiered green/cyan) plus a bright-magenta peak/avg/min summary — magenta sits far enough from both speed tiers on the color wheel that the two segments never read as the same color. */
 export function formatSpeedReading(reading: SpeedReading): string {
   const current = `${getSpeedColor(reading.speed)}⚡ ${reading.speed.toFixed(1)} tok/s${RESET}`;
   const { max, avg, min } = reading.stats;
-  const summary = `${BRIGHT_BLUE}(▲${max.toFixed(0)} ~${avg.toFixed(0)} ▼${min.toFixed(0)})${RESET}`;
+  const summary = `${BRIGHT_MAGENTA}(▲${max.toFixed(0)} ~${avg.toFixed(0)} ▼${min.toFixed(0)})${RESET}`;
   return `${current} ${summary}`;
 }
 
