@@ -100,9 +100,14 @@ produced was in a physically sane range.
 - **`isLive`** — no longer meaningful. Every reading is now "the real rate of the
   actual last completed (or in-progress) turn," not a wall-clock-gap artifact, so
   there's nothing to distinguish "fresh" from "stale."
-- **Forced dim on idle** — removed at the user's request once the indicator became
-  reliably persistent; the color tiers (green ≥150, cyan 60–150, dim <60) are purely
-  about the *speed value itself* now, not about how recently it was measured.
+- **Any use of dim/grey for the speed value** — removed in two steps, both at the
+  user's request. First the *forced* dim-while-idle carry-forward behavior went away
+  once the indicator became reliably persistent. Then the original "slow speed reads
+  as dim" tier went too — a genuinely slow reading is still real, useful information
+  and should stay as easy to read as a fast one, not fade out like a stale/broken
+  value would. `getSpeedColor` now has exactly two tiers: green (≥150 tok/s) and cyan
+  (everything else). `DIM` is still used elsewhere in `colors.ts` for unrelated
+  low-emphasis labels (session name, duration) — just never for the speed reading.
 
 ## A semantic trade-off worth knowing about
 

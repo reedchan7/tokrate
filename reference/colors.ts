@@ -129,11 +129,10 @@ export function getQuotaColor(percent: number, colors?: Partial<HudColorOverride
   return resolveAnsi(colors?.usage, BRIGHT_BLUE);
 }
 
-/** Tiered color by current speed: fast=green, typical=cyan, slow=dim. */
+/** Tiered color by current speed: fast=green, everything else=cyan. Never dim — a slow reading should still be easy to read, not look faded/broken. */
 export function getSpeedColor(tokPerSec: number): string {
   if (tokPerSec >= 150) return GREEN;
-  if (tokPerSec >= 60) return CYAN;
-  return DIM;
+  return CYAN;
 }
 
 /** Full speed segment: current tok/s (tiered by speed) plus a cyan peak/avg/min summary for the session. */
